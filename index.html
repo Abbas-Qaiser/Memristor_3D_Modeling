@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark-neon">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Memristor 3D Schematic — MoO₃/ZnO Stack</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- ═══ TOP TOOLBAR ═══════════════════════════════════════════ -->
+  <header id="toolbar">
+    <div id="title-block">
+      <div class="title-main">Memristor Device</div>
+      <div class="title-sub">MoO₃ / ZnO Resistive Switching Stack</div>
+    </div>
+
+    <nav id="toolbar-right">
+
+      <!-- Theme dropdown -->
+      <div class="dropdown" id="theme-dropdown">
+        <button class="tb-btn" id="theme-btn" aria-haspopup="true" aria-expanded="false">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+            <circle cx="12" cy="12" r="5"/>
+            <line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/>
+            <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+            <line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/>
+            <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+          </svg>
+          Theme
+        </button>
+        <div class="dropdown-menu" id="theme-menu" role="menu">
+          <button class="theme-item active" data-theme="dark-neon"   role="menuitem">Dark Blue / Neon</button>
+          <button class="theme-item"        data-theme="pure-black"  role="menuitem">Pure Black</button>
+          <button class="theme-item"        data-theme="gradient"    role="menuitem">Deep Space Gradient</button>
+          <button class="theme-item"        data-theme="light-gray"  role="menuitem">Light Gray</button>
+          <button class="theme-item"        data-theme="white"       role="menuitem">White / Presentation</button>
+        </div>
+      </div>
+
+      <!-- Download dropdown -->
+      <div class="dropdown" id="export-dropdown">
+        <button class="tb-btn" id="export-btn" aria-haspopup="true" aria-expanded="false">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="7 10 12 15 17 10"/>
+            <line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+          Download
+        </button>
+        <div class="dropdown-menu" id="export-menu" role="menu">
+          <button class="dl-item" data-type="png"         role="menuitem">PNG — Current View</button>
+          <button class="dl-item" data-type="png-hd"      role="menuitem">PNG — High-Res 2×</button>
+          <button class="dl-item" data-type="png-transp"  role="menuitem">PNG — Transparent BG</button>
+          <div class="menu-divider"></div>
+          <button class="dl-item" data-type="webm"        role="menuitem">WebM Video (5s rotation)</button>
+        </div>
+      </div>
+
+      <!-- Layer Colors dropdown -->
+      <div class="dropdown" id="colors-dropdown">
+        <button class="tb-btn" id="colors-btn" aria-haspopup="true" aria-expanded="false">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="13.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="10.5" r="2.5"/>
+            <circle cx="8.5" cy="7.5" r="2.5"/><circle cx="6.5" cy="12.5" r="2.5"/>
+            <path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/>
+          </svg>
+          Colors
+        </button>
+        <div class="dropdown-menu dropdown-colors" id="colors-menu" role="menu">
+          <!-- built by JS -->
+        </div>
+      </div>
+
+      <!-- Presentation mode toggle -->
+      <button class="tb-btn" id="ppt-btn" title="Toggle Presentation Mode">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+          <rect x="2" y="3" width="20" height="14" rx="2"/>
+          <line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/>
+        </svg>
+        <span id="ppt-label">Present</span>
+      </button>
+    </nav>
+  </header>
+
+  <!-- ═══ FABRICATION PANEL (LEFT) ═══════════════════════════════ -->
+  <aside id="fab-panel">
+    <h3>Fabrication Process</h3>
+    <div class="steps" id="fab-steps"><!-- filled by JS --></div>
+    <div class="divider"></div>
+    <p class="legend-hint">Click a step to highlight &middot; Hover layers for details</p>
+  </aside>
+
+  <!-- ═══ 3D CANVAS ═══════════════════════════════════════════════ -->
+  <canvas id="canvas"></canvas>
+
+  <!-- ═══ SVG CONNECTOR LINES (behind labels) ═════════════════════ -->
+  <svg id="label-svg" aria-hidden="true"></svg>
+
+  <!-- ═══ HTML LABEL OVERLAY ══════════════════════════════════════ -->
+  <div id="labels-container" aria-hidden="true"></div>
+
+  <!-- ═══ HOVER TOOLTIP ══════════════════════════════════════════ -->
+  <div id="tooltip" role="tooltip"></div>
+
+  <!-- ═══ BOTTOM BAR ══════════════════════════════════════════════ -->
+  <footer id="bottom-bar">
+    <div id="preset-views">
+      <span class="bar-label">View</span>
+      <button class="view-btn" data-preset="iso">Isometric</button>
+      <button class="view-btn" data-preset="front">Front</button>
+      <button class="view-btn" data-preset="side">Side</button>
+      <button class="view-btn" data-preset="top">Top</button>
+    </div>
+
+    <div id="view-toggles">
+      <button class="toggle-btn active" id="autorotate-toggle">Auto-rotate: ON</button>
+      <button class="toggle-btn active" id="labels-toggle">Labels: ON</button>
+      <button class="toggle-btn active" id="grid-toggle">Grid: ON</button>
+      <button class="toggle-btn" id="sidebar-toggle">Hide Panel</button>
+      <button class="toggle-btn" id="reset-btn">Reset View</button>
+    </div>
+
+    <div id="controls-hint">
+      <span>Drag — Rotate</span>
+      <span>Scroll — Zoom</span>
+      <span>Right-drag — Pan</span>
+    </div>
+  </footer>
+
+  <!-- ═══ RECORDING INDICATOR ═════════════════════════════════════ -->
+  <div id="rec-indicator">
+    <div id="rec-dot"></div>
+    <span>Recording&hellip;</span>
+  </div>
+
+  <!-- ═══ TOAST NOTIFICATION ══════════════════════════════════════ -->
+  <div id="toast"></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  <script src="script.js"></script>
+</body>
+</html>
