@@ -260,8 +260,18 @@ function buildGrid(c1, c2) {
 
 /* ──────────────────────────────────────────────────────────────
    TOP ELECTRODE GEOMETRY (shared, reused)
+   cylRadius and cylHeight are mutable — user-controlled via UI
 ────────────────────────────────────────────────────────────── */
-const cylGeo = new THREE.CylinderGeometry(0.22, 0.22, 0.30, 40);
+let cylRadius = 0.22;
+let cylHeight  = 0.30;
+let cylGeo = new THREE.CylinderGeometry(cylRadius, cylRadius, cylHeight, 40);
+
+/** Rebuild cylinder geometry with current radius/height and refresh all meshes */
+function rebuildCylGeo() {
+  cylGeo.dispose();
+  cylGeo = new THREE.CylinderGeometry(cylRadius, cylRadius, cylHeight, 40);
+  topGroup.children.forEach(mesh => { mesh.geometry = cylGeo; });
+}
 const cylMat = new THREE.MeshStandardMaterial({
   color:     topElecConfig.color,
   metalness: 0.97,
@@ -287,7 +297,7 @@ function buildTopElectrodes() {
   for (let r = 0; r < ROWS; r++) {
     for (let c = 0; c < COLS; c++) {
       const cyl = new THREE.Mesh(cylGeo, cylMat);
-      cyl.position.set(-xSpan / 2 + c * xStep, 0.15, -zSpan / 2 + r * zStep);
+      cyl.position.set(-xSpan / 2 + c * xStep, cylHeight / 2, -zSpan / 2 + r * zStep);
       topGroup.add(cyl);
     }
   }
@@ -537,9 +547,54 @@ function buildColorMenu() {
     nameEl.className   = 'color-name';
     nameEl.textContent = 'Pt (Top)';
 
-    // Empty spacer for thickness column alignment
-    const spacer = document.createElement('div');
-    spacer.className = 'thickness-ctrl';
+    // Size controls — Radius
+    const radiusCtrl = document.createElement('div');
+    radiusCtrl.className = 'thickness-ctrl';
+    radiusCtrl.innerHTML = `<label class="thick-label">r:</label>`;
+    const radiusInput = document.createElement('input');
+    radiusInput.type      = 'number';
+    radiusInput.className = 'thickness-input';
+    radiusInput.value     = cylRadius.toFixed(2);
+    radiusInput.min       = '0.05';
+    radiusInput.max       = '1.00';
+    radiusInput.step      = '0.01';
+    radiusInput.title     = 'Electrode radius (visual units)';
+    radiusInput.addEventListener('click',     e => e.stopPropagation());
+    radiusInput.addEventListener('mousedown', e => e.stopPropagation());
+    radiusInput.addEventListener('change', e => {
+      const val = parseFloat(e.target.value);
+      if (!isNaN(val) && val >= 0.05) {
+        cylRadius = Math.min(1.0, Math.max(0.05, val));
+        rebuildCylGeo();
+        showToast(`Top electrode radius → ${cylRadius.toFixed(2)}`);
+      }
+    });
+    radiusCtrl.appendChild(radiusInput);
+
+    // Size controls — Height
+    const heightCtrl = document.createElement('div');
+    heightCtrl.className = 'thickness-ctrl';
+    heightCtrl.innerHTML = `<label class="thick-label">h:</label>`;
+    const heightInput = document.createElement('input');
+    heightInput.type      = 'number';
+    heightInput.className = 'thickness-input';
+    heightInput.value     = cylHeight.toFixed(2);
+    heightInput.min       = '0.05';
+    heightInput.max       = '2.00';
+    heightInput.step      = '0.05';
+    heightInput.title     = 'Electrode height (visual units)';
+    heightInput.addEventListener('click',     e => e.stopPropagation());
+    heightInput.addEventListener('mousedown', e => e.stopPropagation());
+    heightInput.addEventListener('change', e => {
+      const val = parseFloat(e.target.value);
+      if (!isNaN(val) && val >= 0.05) {
+        cylHeight = Math.min(2.0, Math.max(0.05, val));
+        rebuildCylGeo();
+        buildTopElectrodes();   // re-centre y-positions
+        showToast(`Top electrode height → ${cylHeight.toFixed(2)}`);
+      }
+    });
+    heightCtrl.appendChild(heightInput);
 
     const colorInput = document.createElement('input');
     colorInput.type      = 'color';
@@ -569,7 +624,8 @@ function buildColorMenu() {
 
     row.appendChild(dot);
     row.appendChild(nameEl);
-    row.appendChild(spacer);
+    row.appendChild(radiusCtrl);
+    row.appendChild(heightCtrl);
     row.appendChild(colorInput);
     row.appendChild(delBtn);
     colorsMenu.appendChild(row);
@@ -704,6 +760,11 @@ function resetToDefaults() {
   topElecConfig.visible = TOP_ELEC_DEFAULT.visible;
   topElecConfig.accent  = TOP_ELEC_DEFAULT.accent;
   topElecConfig.color   = TOP_ELEC_DEFAULT.color;
+
+  // Restore top electrode size
+  cylRadius = 0.22;
+  cylHeight  = 0.30;
+  rebuildCylGeo();
 
   // Restore top electrode 3D material
   cylMat.color.setHex(topElecConfig.color);
