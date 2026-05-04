@@ -222,7 +222,7 @@ const renderer = new THREE.WebGLRenderer({
 // Cap at 2.5 to gain extra crispness on hi-DPI screens without tanking FPS
 renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2.5));
 renderer.setSize(window.innerWidth, window.innerHeight);
-renderer.shadowMap.enabled = true;
+renderer.shadowMap.enabled = false;   // shadows disabled — no upper-on-lower casting
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.3;
@@ -248,6 +248,11 @@ controls.autoRotate      = true;
 controls.autoRotateSpeed = 0.55;
 controls.minDistance     = 3;
 controls.maxDistance     = 30;
+controls.enablePan       = true;
+controls.touches = {
+  ONE: THREE.TOUCH.ROTATE,
+  TWO: THREE.TOUCH.DOLLY_PAN,
+};
 controls.update();
 
 /* ──────────────────────────────────────────────────────────────
@@ -258,7 +263,7 @@ scene.add(ambientLight);
 
 const keyLight = new THREE.DirectionalLight(0xffffff, 1.8);
 keyLight.position.set(8, 14, 8);
-keyLight.castShadow = true;
+keyLight.castShadow = false;        // shadows disabled
 keyLight.shadow.mapSize.set(4096, 4096);   // 4× sharper shadow map → smoother edges
 keyLight.shadow.camera.near   = 0.5;
 keyLight.shadow.camera.far    = 40;
@@ -293,9 +298,10 @@ const glowMat = new THREE.MeshBasicMaterial({
 let glowPlane = new THREE.Mesh(glowGeo, glowMat);
 glowPlane.rotation.x = -Math.PI / 2;
 glowPlane.position.y = 0.005;
+glowPlane.visible = false;     // OFF by default — user requested no floor box
 scene.add(glowPlane);
 
-let glowVisible = true;   // user-controlled
+let glowVisible = false;  // OFF by default — user requested no floor box
 
 /** Rebuild the glow plane geometry to match current STACK_W/STACK_D */
 function rebuildGlowPlane() {
@@ -355,6 +361,18 @@ _applyVisibleColor(cylMat, topElecConfig.color);
 
 const topGroup = new THREE.Group();
 scene.add(topGroup);
+
+const cathodeTerminalGroup = new THREE.Group();
+cathodeTerminalGroup.visible = false;   // user requested: no box attached to Si layer
+scene.add(cathodeTerminalGroup);
+
+let cathodeTerminalMesh = null;
+let cathodeSocketMesh = null;
+
+const cathodeTerminal = {
+  layerIndex: -1,
+  anchorLocal: new THREE.Vector3(),
+};
 
 /** Build the cylinder grid inside topGroup, honoring rows/cols/removed.
  *
@@ -448,7 +466,15 @@ function buildStack() {
 
   LAYER_DEFS.forEach((lyr, i) => {
     // ── 3D mesh ──────────────────────────────────────────────────
-    const geo = new THREE.BoxGeometry(STACK_W, lyr.height, STACK_D);
+    // Per-layer length (lyr.width) and depth (lyr.depth) — fall back
+    // to global STACK_W / STACK_D when not customised by the user.
+    const lyrW = (lyr.width != null) ? lyr.width : STACK_W;
+    const lyrD = (lyr.depth != null) ? lyr.depth : STACK_D;
+    // Left-anchored growth: keep the LEFT edge at the same x and
+    // extend only to the RIGHT when the user enlarges this layer.
+    const xShift = (lyrW - STACK_W) / 2;
+
+    const geo = new THREE.BoxGeometry(lyrW, lyr.height, lyrD);
     const mat = new THREE.MeshStandardMaterial({
       color:           lyr.color,
       metalness:       lyr.metalness,
@@ -461,9 +487,9 @@ function buildStack() {
     _applyVisibleColor(mat, lyr.color);
 
     const mesh = new THREE.Mesh(geo, mat);
-    mesh.position.set(0, yAccum + lyr.height / 2, 0);
-    mesh.castShadow    = true;
-    mesh.receiveShadow = true;
+    mesh.position.set(xShift, yAccum + lyr.height / 2, 0);
+    mesh.castShadow    = false;   // shadows OFF — no upper-on-lower casting
+    mesh.receiveShadow = false;
     mesh.userData      = { ...lyr, layerIndex: i };
     scene.add(mesh);
     layerMeshes.push(mesh);
@@ -513,6 +539,8 @@ function buildStack() {
   }
 
   // ── Refresh side panels ───────────────────────────────────────
+  updateCathodeTerminal();
+  rebuildCircuit3D();
   buildFabPanel();
   buildColorMenu();
   buildControlsMenu();
@@ -734,6 +762,30 @@ function buildControlsMenu() {
     });
     thickCtrl.appendChild(thickInput);
 
+    // Length (one-direction growth — see buildStack xShift)
+    const lenCtrl = document.createElement('div');
+    lenCtrl.className = 'thickness-ctrl';
+    lenCtrl.innerHTML = `<label class="thick-label">L:</label>`;
+    const lenInput = document.createElement('input');
+    lenInput.type      = 'number';
+    lenInput.className = 'thickness-input';
+    lenInput.value     = ((lyr.width != null) ? lyr.width : STACK_W).toFixed(2);
+    lenInput.min       = '1.00';
+    lenInput.max       = '20.00';
+    lenInput.step      = '0.10';
+    lenInput.title     = 'Layer length (extends only to the right)';
+    lenInput.addEventListener('click',     e => e.stopPropagation());
+    lenInput.addEventListener('mousedown', e => e.stopPropagation());
+    lenInput.addEventListener('change', e => {
+      const val = parseFloat(e.target.value);
+      if (!isNaN(val) && val >= 1.0) {
+        LAYER_DEFS[i].width = Math.min(20.0, Math.max(1.0, val));
+        buildStack();
+        showToast(`${LAYER_DEFS[i].name} length → ${LAYER_DEFS[i].width.toFixed(2)}`);
+      }
+    });
+    lenCtrl.appendChild(lenInput);
+
     // Delete button
     const delBtn = document.createElement('button');
     delBtn.className   = 'delete-layer-btn';
@@ -754,6 +806,7 @@ function buildControlsMenu() {
     row.appendChild(dot);
     row.appendChild(nameEl);
     row.appendChild(thickCtrl);
+    row.appendChild(lenCtrl);
     row.appendChild(delBtn);
     controlsMenu.appendChild(row);
   });
@@ -936,12 +989,93 @@ function buildControlsMenu() {
   }
 
   // ── Add Layer + Reset sections ────────────────────────────────
+  _buildCircuitControlsSection(controlsMenu);
+
   const actionDiv = document.createElement('div');
   actionDiv.className = 'menu-divider';
   controlsMenu.appendChild(actionDiv);
 
   _buildAddLayerSection(controlsMenu);
   _buildResetSection(controlsMenu);
+}
+
+function _buildCircuitControlsSection(container) {
+  const divider = document.createElement('div');
+  divider.className = 'menu-divider';
+  container.appendChild(divider);
+
+  const header = document.createElement('div');
+  header.className = 'menu-subheader';
+  header.textContent = '3D CIRCUIT';
+  container.appendChild(header);
+
+  const thickRow = document.createElement('div');
+  thickRow.className = 'color-row';
+
+  const thickName = document.createElement('span');
+  thickName.className = 'color-name';
+  thickName.textContent = 'Wire';
+
+  const thickCtrl = document.createElement('div');
+  thickCtrl.className = 'thickness-ctrl';
+  thickCtrl.innerHTML = '<label class="thick-label">t:</label>';
+
+  const thickInput = document.createElement('input');
+  thickInput.type = 'number';
+  thickInput.className = 'thickness-input';
+  thickInput.value = circuit.wireRadius.toFixed(2);
+  thickInput.min = '0.02';
+  thickInput.max = '0.18';
+  thickInput.step = '0.01';
+  thickInput.title = '3D wire thickness';
+  thickInput.addEventListener('click', e => e.stopPropagation());
+  thickInput.addEventListener('mousedown', e => e.stopPropagation());
+  thickInput.addEventListener('change', e => {
+    const val = parseFloat(e.target.value);
+    if (!isNaN(val)) {
+      circuit.wireRadius = Math.min(0.18, Math.max(0.02, val));
+      rebuildCircuit3D();
+      showToast('Wire thickness ' + circuit.wireRadius.toFixed(2));
+    }
+  });
+
+  thickCtrl.appendChild(thickInput);
+  thickRow.appendChild(thickName);
+  thickRow.appendChild(thickCtrl);
+  container.appendChild(thickRow);
+
+  const styleRow = document.createElement('div');
+  styleRow.className = 'color-row';
+
+  const styleName = document.createElement('span');
+  styleName.className = 'color-name';
+  styleName.textContent = 'Style';
+
+  const styleSelect = document.createElement('select');
+  styleSelect.className = 'circuit-style-select';
+  styleSelect.title = 'Connection path style';
+  [
+    ['direct', 'Direct'],
+    ['manual', 'Manual'],
+    ['mango', 'Mango'],
+  ].forEach(([value, label]) => {
+    const opt = document.createElement('option');
+    opt.value = value;
+    opt.textContent = label;
+    opt.selected = circuit.style === value;
+    styleSelect.appendChild(opt);
+  });
+  styleSelect.addEventListener('click', e => e.stopPropagation());
+  styleSelect.addEventListener('mousedown', e => e.stopPropagation());
+  styleSelect.addEventListener('change', e => {
+    circuit.style = e.target.value;
+    rebuildCircuit3D();
+    showToast('Circuit style: ' + e.target.options[e.target.selectedIndex].textContent);
+  });
+
+  styleRow.appendChild(styleName);
+  styleRow.appendChild(styleSelect);
+  container.appendChild(styleRow);
 }
 
 /* ──────────────────────────────────────────────────────────────
@@ -1235,6 +1369,11 @@ function updateLayerColor(idx, hexStr) {
       const dot = el.parentElement && el.parentElement.querySelector('.color-indicator');
       if (dot) dot.style.background = hexStr;
     });
+
+    if (idx === cathodeTerminal.layerIndex) {
+      updateCathodeTerminal();
+      updateCircuitHud();
+    }
 
   } else {
     // ── Top electrodes ──────────────────────────────────────────
@@ -1572,6 +1711,7 @@ function handleExport(type) {
   switch (type) {
     case 'png':        captureImage(false, 1); break;
     case 'png-hd':     captureImage(false, 2); break;
+    case 'png-ultra':  captureImage(false, 4); break;
     case 'png-transp': captureImage(true,  1); break;
     case 'webm':       startVideoCapture();    break;
   }
@@ -1974,6 +2114,335 @@ function applyUITextToDOM() {
 /* ──────────────────────────────────────────────────────────────
    EDIT MODE — click any electrode (or layer) in 3D to remove it
 ────────────────────────────────────────────────────────────── */
+const circuitSvg = document.getElementById('circuit-svg');
+const circuitHud = document.getElementById('circuit-hud');
+const circuitBtn = document.getElementById('circuit-mode-toggle');
+
+const circuit = {
+  active: false,
+  anodeMesh: null,
+  style: 'manual',
+  wireRadius: 0.055,
+  voltSim: 1.25,
+  ampSim: 0.38,
+};
+
+const circuitGroup = new THREE.Group();
+scene.add(circuitGroup);
+
+const circuitMaterials = {
+  pos: new THREE.MeshStandardMaterial({ color: 0xef4444, emissive: 0x4b0909, emissiveIntensity: 0.85, metalness: 0.18, roughness: 0.35 }),
+  neg: new THREE.MeshStandardMaterial({ color: 0x3b82f6, emissive: 0x071a4f, emissiveIntensity: 0.85, metalness: 0.18, roughness: 0.35 }),
+  solder: new THREE.MeshStandardMaterial({ color: 0xf8fafc, emissive: 0x343a40, emissiveIntensity: 0.35, metalness: 0.65, roughness: 0.22 }),
+  terminal: new THREE.MeshStandardMaterial({ color: 0x76a9ff, emissive: 0x0b1d45, emissiveIntensity: 0.45, metalness: 0.58, roughness: 0.28 }),
+  source: new THREE.MeshStandardMaterial({ color: 0xf59e0b, emissive: 0x5f3302, emissiveIntensity: 0.75, metalness: 0.28, roughness: 0.36 }),
+};
+
+function _bottomElectrodeLayerIndex() {
+  return 0;
+}
+
+function updateCathodeTerminal() {
+  while (cathodeTerminalGroup.children.length) {
+    const child = cathodeTerminalGroup.children.pop();
+    if (child.geometry) child.geometry.dispose();
+    if (child.material && child.material.dispose) child.material.dispose();
+  }
+
+  const idx = _bottomElectrodeLayerIndex();
+  const layerMesh = layerMeshes[idx];
+  if (!layerMesh) {
+    cathodeTerminalMesh = null;
+    cathodeSocketMesh = null;
+    cathodeTerminal.layerIndex = -1;
+    return;
+  }
+
+  const layerH = Math.max(0.08, LAYER_DEFS[idx].height);
+  const leadLen = 0.42;
+  const leadW = 0.42;
+  const leadH = Math.max(0.08, layerH * 0.92);
+  const z = STACK_D * 0.5 - Math.min(0.78, STACK_D * 0.28);
+  const x = STACK_W * 0.5 + leadLen * 0.5 - 0.02;
+  const y = layerMesh.position.y;
+
+  const terminalMat = layerMesh.material.clone();
+  terminalMat.color.copy(layerMesh.material.color);
+  terminalMat.emissive.copy(layerMesh.material.emissive);
+  terminalMat.emissiveIntensity = layerMesh.material.emissiveIntensity;
+
+  cathodeTerminalMesh = new THREE.Mesh(new THREE.BoxGeometry(leadLen, leadH, leadW), terminalMat);
+  cathodeTerminalMesh.position.set(x, y, z);
+  cathodeTerminalMesh.castShadow = false;
+  cathodeTerminalMesh.receiveShadow = false;
+  cathodeTerminalMesh.userData = { isCathodeTerminal: true };
+  cathodeTerminalGroup.add(cathodeTerminalMesh);
+
+  cathodeSocketMesh = new THREE.Mesh(new THREE.BoxGeometry(0.24, leadH * 1.08, leadW * 1.08), terminalMat.clone());
+  cathodeSocketMesh.position.set(x + leadLen * 0.5 + 0.03, y, z);
+  cathodeSocketMesh.castShadow = false;
+  cathodeSocketMesh.receiveShadow = false;
+  cathodeSocketMesh.userData = { isCathodeTerminal: true };
+  cathodeTerminalGroup.add(cathodeSocketMesh);
+
+  cathodeTerminal.layerIndex = idx;
+  cathodeTerminal.anchorLocal.set(cathodeSocketMesh.position.x + 0.13, cathodeSocketMesh.position.y + leadH * 0.5, cathodeSocketMesh.position.z);
+  cathodeTerminalGroup.visible = false;   // never show — user requested removal
+}
+
+function _anodeAnchorWorld() {
+  if (!circuit.anodeMesh || !circuit.anodeMesh.parent) return null;
+  const pos = new THREE.Vector3();
+  circuit.anodeMesh.getWorldPosition(pos);
+  pos.y += cylHeight * 0.5;
+  return pos;
+}
+
+function _cathodeAnchorWorld() {
+  if (!cathodeSocketMesh) return null;
+  return cathodeTerminal.anchorLocal.clone();
+}
+
+function _addTube(points, material) {
+  const clean = points.filter(Boolean).map(p => p.clone());
+  if (clean.length < 2) return null;
+  const curve = new THREE.CatmullRomCurve3(clean, false, 'catmullrom', 0.35);
+  const geo = new THREE.TubeGeometry(curve, Math.max(24, clean.length * 18), circuit.wireRadius, 16, false);
+  const mesh = new THREE.Mesh(geo, material);
+  mesh.castShadow = true;
+  circuitGroup.add(mesh);
+  return mesh;
+}
+
+function _addSolderDot(pos, material) {
+  const mesh = new THREE.Mesh(new THREE.SphereGeometry(circuit.wireRadius * 1.55, 28, 16), material || circuitMaterials.solder);
+  mesh.position.copy(pos);
+  mesh.castShadow = true;
+  circuitGroup.add(mesh);
+}
+
+function _circuitPoints(style, anode, cathode) {
+  const topY = Math.max(anode.y, cathode.y) + 0.78;
+  const sideX = Math.min(-STACK_W * 0.5 - 1.45, cathode.x - 0.55);
+  const sideZ = cathode.z - 0.18;
+  const source = new THREE.Vector3(sideX, (anode.y + cathode.y) * 0.5 + 0.42, sideZ);
+  const sourceTop = source.clone().add(new THREE.Vector3(0, 0.34, 0));
+  const sourceBottom = source.clone().add(new THREE.Vector3(0, -0.34, 0));
+
+  if (style === 'direct') {
+    return {
+      source, sourceTop, sourceBottom,
+      pos: [anode, anode.clone().lerp(sourceTop, 0.55).setY(topY), sourceTop],
+      neg: [sourceBottom, cathode.clone().lerp(sourceBottom, 0.45).setY(cathode.y + 0.42), cathode],
+    };
+  }
+  if (style === 'mango') {
+    const arcZ = cathode.z - 1.05;
+    return {
+      source, sourceTop, sourceBottom,
+      pos: [anode, new THREE.Vector3(anode.x, topY, anode.z), new THREE.Vector3((anode.x + sideX) * 0.5, topY + 0.18, arcZ), new THREE.Vector3(sideX, sourceTop.y + 0.34, arcZ), sourceTop],
+      neg: [sourceBottom, new THREE.Vector3(sideX, sourceBottom.y - 0.28, arcZ), new THREE.Vector3(cathode.x - 0.42, cathode.y + 0.38, arcZ), new THREE.Vector3(cathode.x - 0.28, cathode.y + 0.18, cathode.z), cathode],
+    };
+  }
+  return {
+    source, sourceTop, sourceBottom,
+    pos: [anode, new THREE.Vector3(anode.x, topY, anode.z), new THREE.Vector3(sideX, topY, anode.z), sourceTop],
+    neg: [sourceBottom, new THREE.Vector3(sideX, cathode.y + 0.48, sideZ), new THREE.Vector3(cathode.x - 0.32, cathode.y + 0.48, cathode.z), cathode],
+  };
+}
+
+function _addVoltageSource(center, topPoint, bottomPoint) {
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.28, Math.max(0.022, circuit.wireRadius * 0.45), 18, 72), circuitMaterials.source);
+  ring.position.copy(center);
+  ring.rotation.y = Math.PI / 2;
+  ring.castShadow = true;
+  circuitGroup.add(ring);
+  const core = new THREE.Mesh(new THREE.SphereGeometry(0.11, 32, 16), circuitMaterials.source);
+  core.position.copy(center);
+  core.scale.set(0.55, 1, 1);
+  circuitGroup.add(core);
+  _addTube([topPoint, center.clone().add(new THREE.Vector3(0, 0.28, 0))], circuitMaterials.pos);
+  _addTube([center.clone().add(new THREE.Vector3(0, -0.28, 0)), bottomPoint], circuitMaterials.neg);
+}
+
+function rebuildCircuit3D() {
+  while (circuitGroup.children.length) {
+    const child = circuitGroup.children.pop();
+    if (child.geometry) child.geometry.dispose();
+  }
+}
+
+function disconnectCircuit() {
+  circuit.anodeMesh = null;
+  rebuildCircuit3D();
+  updateCircuitHud();
+  showToast('Circuit disconnected');
+}
+
+function _projectCircuitPoint(pos) {
+  const p = pos.clone().project(camera);
+  const rect = canvas.getBoundingClientRect();
+  return { x: ((p.x + 1) * 0.5) * rect.width, y: ((-p.y + 1) * 0.5) * rect.height, behind: p.z > 1 };
+}
+
+function updateCircuitHud() {
+  if (!circuit.active) {
+    circuitSvg.innerHTML = '';
+    circuitHud.innerHTML = '';
+    return;
+  }
+  circuitSvg.innerHTML = '';
+  const anode = _anodeAnchorWorld();
+  const cathode = _cathodeAnchorWorld();
+  if (!anode || !cathode) {
+    circuitHud.innerHTML = '';
+    return;
+  }
+  const pa = _projectCircuitPoint(anode);
+  const pc = _projectCircuitPoint(cathode);
+  if (pa.behind || pc.behind) {
+    circuitHud.innerHTML = '';
+    return;
+  }
+
+  const rect = canvas.getBoundingClientRect();
+  const W = rect.width || window.innerWidth;
+  const H = rect.height || window.innerHeight;
+  const side = pa.x > W * 0.5 ? 1 : -1;
+  const maxX = Math.max(pa.x, pc.x);
+  const minX = Math.min(pa.x, pc.x);
+  const vX = side > 0 ? Math.min(W - 92, maxX + 122) : Math.max(92, minX - 122);
+  const vY = Math.max(94, Math.min(H - 94, (pa.y + pc.y) * 0.5));
+  const r = 24;
+  const shoulder = circuit.style === 'direct' ? 10 : circuit.style === 'mango' ? 34 : 22;
+  const wirePx = Math.max(2.0, Math.min(7.0, circuit.wireRadius * 58));
+  const flowPx = wirePx + 0.9;
+
+  const topKneeY = pa.y - shoulder;
+  const bottomKneeY = pc.y + shoulder;
+  let posD;
+  let negD;
+  if (circuit.style === 'direct') {
+    posD = 'M ' + pa.x + ' ' + pa.y + ' C ' + ((pa.x + vX) / 2) + ' ' + pa.y + ' ' + vX + ' ' + (vY - r - 8) + ' ' + vX + ' ' + (vY - r);
+    negD = 'M ' + vX + ' ' + (vY + r) + ' C ' + vX + ' ' + (vY + r + 20) + ' ' + ((pc.x + vX) / 2) + ' ' + pc.y + ' ' + pc.x + ' ' + pc.y;
+  } else if (circuit.style === 'mango') {
+    const bulge = side * 42;
+    posD = 'M ' + pa.x + ' ' + pa.y +
+      ' C ' + pa.x + ' ' + (pa.y - 64) + ' ' + (vX - bulge) + ' ' + (topKneeY - 26) + ' ' + vX + ' ' + (vY - r);
+    negD = 'M ' + vX + ' ' + (vY + r) +
+      ' C ' + (vX - bulge) + ' ' + (bottomKneeY + 28) + ' ' + (pc.x - side * 34) + ' ' + (pc.y + 34) + ' ' + pc.x + ' ' + pc.y;
+  } else {
+    posD = 'M ' + pa.x + ' ' + pa.y +
+      ' L ' + pa.x + ' ' + topKneeY +
+      ' L ' + vX + ' ' + topKneeY +
+      ' L ' + vX + ' ' + (vY - r);
+    negD = 'M ' + vX + ' ' + (vY + r) +
+      ' L ' + vX + ' ' + bottomKneeY +
+      ' L ' + pc.x + ' ' + bottomKneeY +
+      ' L ' + pc.x + ' ' + pc.y;
+  }
+
+  const groundY = Math.min(H - 32, pc.y + 72);
+  const groundD = 'M ' + pc.x + ' ' + pc.y + ' L ' + pc.x + ' ' + groundY;
+  const flowD = posD + ' ' + negD + ' ' + groundD;
+  const dotR = Math.max(3.3, wirePx * 1.45);
+  const groundSvg =
+    '<line class="circ-ground-line" style="stroke-width:' + wirePx.toFixed(1) + '" x1="' + (pc.x - 14) + '" y1="' + groundY + '" x2="' + (pc.x + 14) + '" y2="' + groundY + '"/>' +
+    '<line class="circ-ground-line" style="stroke-width:' + wirePx.toFixed(1) + '" x1="' + (pc.x - 10) + '" y1="' + (groundY + 6) + '" x2="' + (pc.x + 10) + '" y2="' + (groundY + 6) + '"/>' +
+    '<line class="circ-ground-line" style="stroke-width:' + wirePx.toFixed(1) + '" x1="' + (pc.x - 6) + '" y1="' + (groundY + 12) + '" x2="' + (pc.x + 6) + '" y2="' + (groundY + 12) + '"/>';
+
+  circuitSvg.innerHTML =
+    '<path class="circ-wire pos" style="stroke-width:' + wirePx.toFixed(1) + '" d="' + posD + '"/>' +
+    '<path class="circ-wire neg" style="stroke-width:' + wirePx.toFixed(1) + '" d="' + negD + '"/>' +
+    '<path class="circ-wire neg" style="stroke-width:' + wirePx.toFixed(1) + '" d="' + groundD + '"/>' +
+    '<path class="circ-current" style="stroke-width:' + flowPx.toFixed(1) + '" d="' + flowD + '"/>' +
+    groundSvg +
+    '<circle class="circ-vsrc-body" cx="' + vX + '" cy="' + vY + '" r="' + r + '"/>' +
+    '<text class="circ-vsrc-text" x="' + vX + '" y="' + (vY + 1) + '">V</text>' +
+    '<text class="circ-vsrc-sign" x="' + vX + '" y="' + (vY - r + 7) + '">+</text>' +
+    '<text class="circ-vsrc-sign" x="' + vX + '" y="' + (vY + r - 7) + '">-</text>' +
+    '<circle class="circ-dot" cx="' + pa.x + '" cy="' + pa.y + '" r="' + dotR.toFixed(1) + '"/>' +
+    '<circle class="circ-dot" cx="' + pc.x + '" cy="' + pc.y + '" r="' + dotR.toFixed(1) + '"/>';
+
+  const t = clock ? clock.getElapsedTime() : 0;
+  const vVal = (circuit.voltSim + Math.sin(t * 1.8) * 0.04).toFixed(2);
+  const iVal = (circuit.ampSim + Math.sin(t * 2.3 + 1.0) * 0.015).toFixed(3);
+  const ensureHud = (id, className, html) => {
+    let el = document.getElementById(id);
+    if (!el) {
+      el = document.createElement(id === 'circuit-disconnect' ? 'button' : 'div');
+      el.id = id;
+      el.className = className;
+      circuitHud.appendChild(el);
+    }
+    if (html !== undefined && el.innerHTML !== html) el.innerHTML = html;
+    return el;
+  };
+  const place = (el, x, y) => {
+    el.style.left = x.toFixed(1) + 'px';
+    el.style.top = y.toFixed(1) + 'px';
+  };
+
+  const anodeEl = ensureHud('circuit-anode-label', 'circ-pick anode', 'ANODE +');
+  place(anodeEl, pa.x, pa.y - 16);
+
+  const cathodeEl = ensureHud('circuit-cathode-label', 'circ-pick cathode', 'CATHODE -');
+  place(cathodeEl, pc.x, pc.y - 16);
+
+  const voltEl = ensureHud('circuit-volt-meter', 'circ-meter volt',
+    '<div class="circ-meter-head">VOLTMETER</div><div class="circ-meter-value">' + vVal + ' V</div>');
+  place(voltEl, (pa.x + vX) / 2, Math.min(pa.y, vY) - 28);
+
+  const ampEl = ensureHud('circuit-amp-meter', 'circ-meter amp',
+    '<div class="circ-meter-head">AMMETER</div><div class="circ-meter-value">' + iVal + ' mA</div>');
+  place(ampEl, (pc.x + vX) / 2, Math.max(pc.y, vY) + 24);
+
+  const dcBtn = ensureHud('circuit-disconnect', '', circuit.anodeMesh ? 'Disconnect' : 'Connect');
+  place(dcBtn, vX + side * (r + 42), vY);
+  if (!dcBtn.dataset.bound) {
+    dcBtn.dataset.bound = '1';
+    dcBtn.addEventListener('click', e => {
+      e.stopPropagation();
+      disconnectCircuit();
+    });
+  }
+}
+
+function updateCircuit() {
+  updateCircuitHud();
+}
+
+circuitBtn.addEventListener('click', () => {
+  circuit.active = !circuit.active;
+  circuitBtn.textContent = 'Circuit: ' + (circuit.active ? 'ON' : 'OFF');
+  circuitBtn.classList.toggle('active', circuit.active);
+  document.body.classList.toggle('circuit-mode', circuit.active);
+  document.body.setAttribute('data-circuit-step', circuit.active ? 'Click a top electrode for anode; cathode is fixed on the bottom terminal' : '');
+  rebuildCircuit3D();
+  updateCircuitHud();
+  showToast(circuit.active ? '3D Circuit ON - click top electrode for anode' : 'Circuit Mode OFF');
+});
+
+const _circRay = new THREE.Raycaster();
+const _circNDC = new THREE.Vector2();
+
+renderer.domElement.addEventListener('click', e => {
+  if (!circuit.active) return;
+  const rect = canvas.getBoundingClientRect();
+  _circNDC.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+  _circNDC.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+  _circRay.setFromCamera(_circNDC, camera);
+  const topHits = _circRay.intersectObjects(topGroup.children, false);
+  if (topHits.length > 0 && topHits[0].object.userData.isTopElectrode) {
+    circuit.anodeMesh = topHits[0].object;
+    const ud = circuit.anodeMesh.userData;
+    rebuildCircuit3D();
+    updateCircuitHud();
+    document.body.setAttribute('data-circuit-step', 'Circuit connected to fixed bottom cathode terminal');
+    showToast('Anode locked to top electrode ' + (ud.row + 1) + ',' + (ud.col + 1));
+  }
+});
+
 const editModeBtn = document.getElementById('edit-mode-toggle');
 let editMode = false;
 
@@ -2043,6 +2512,7 @@ function animate() {
   controls.update();
   renderer.render(scene, camera);
   updateLabels();
+  updateCircuit();
 }
 
 /* ──────────────────────────────────────────────────────────────
@@ -2052,10 +2522,9 @@ window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight, false);
   updateCameraViewOffset();
 });
-
-/* ──────────────────────────────────────────────────────────────
+/* ==============================================================
    INITIALISE
-────────────────────────────────────────────────────────────── */
+   ============================================================== */
 recomputeStackDimensions();
 rebuildGlowPlane();
 buildStack();

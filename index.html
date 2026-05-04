@@ -58,6 +58,7 @@
         <div class="dropdown-menu" id="export-menu" role="menu">
           <button class="dl-item" data-type="png"         role="menuitem">PNG — Current View</button>
           <button class="dl-item" data-type="png-hd"      role="menuitem">PNG — High-Res 2×</button>
+          <button class="dl-item" data-type="png-ultra"   role="menuitem">PNG — PPT Ultra 4×</button>
           <button class="dl-item" data-type="png-transp"  role="menuitem">PNG — Transparent BG</button>
           <div class="menu-divider"></div>
           <button class="dl-item" data-type="webm"        role="menuitem">WebM Video (5s rotation)</button>
@@ -118,6 +119,10 @@
   <!-- ═══ SVG CONNECTOR LINES (behind labels) ═════════════════════ -->
   <svg id="label-svg" aria-hidden="true"></svg>
 
+  <!-- ═══ CIRCUIT OVERLAY (wires, V source, ground, meters) ═══════ -->
+  <svg id="circuit-svg" aria-hidden="false"></svg>
+  <div id="circuit-hud" aria-hidden="true"></div>
+
   <!-- ═══ HTML LABEL OVERLAY ══════════════════════════════════════ -->
   <div id="labels-container" aria-hidden="true"></div>
 
@@ -138,8 +143,9 @@
       <button class="toggle-btn active" id="autorotate-toggle">Auto-rotate: ON</button>
       <button class="toggle-btn active" id="labels-toggle">Labels: ON</button>
       <button class="toggle-btn active" id="grid-toggle">Grid: ON</button>
-      <button class="toggle-btn active" id="shadow-toggle">Shadow: ON</button>
+      <button class="toggle-btn" id="shadow-toggle">Shadow: OFF</button>
       <button class="toggle-btn" id="edit-mode-toggle" title="Click any electrode in 3D view to remove it">Edit: OFF</button>
+      <button class="toggle-btn" id="circuit-mode-toggle" title="Connect top &amp; bottom electrodes via a voltage source">Circuit: OFF</button>
       <button class="toggle-btn" id="sidebar-toggle">Hide Panel</button>
       <button class="toggle-btn" id="reset-btn">Reset View</button>
     </div>
